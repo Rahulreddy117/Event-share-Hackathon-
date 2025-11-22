@@ -11,6 +11,7 @@
   "dependencies": {
     "@cloudinary/react": "^1.14.3",
     "@cloudinary/url-gen": "^1.22.0",
+    "@tensorflow/tfjs": "^4.22.0",
     "@vladmandic/face-api": "^1.7.15",
     "cloudinary": "^2.8.0",
     "firebase": "^12.6.0",
@@ -18,6 +19,7 @@
     "framer-motion": "^12.23.24",
     "lucide-react": "^0.554.0",
     "next": "16.0.3",
+    "nsfwjs": "^4.2.1",
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },

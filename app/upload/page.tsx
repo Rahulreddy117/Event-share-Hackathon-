@@ -6,6 +6,10 @@ import { createEvent } from '@/actions/createEvent';
 import { Upload, Copy, Eye, Clock, CheckCircle2, ArrowLeft, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// NSFW safety imports
+import * as nsfwjs from 'nsfwjs';
+import * as tf from '@tensorflow/tfjs';
+
 // Doodle SVG filter for hand-drawn effect
 const DoodleFilter = () => (
   <svg className="absolute w-0 h-0">
@@ -19,7 +23,13 @@ const DoodleFilter = () => (
 );
 
 // Animated doodle border component
-const DoodleBorder = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
+const DoodleBorder = ({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) => (
   <div className={`relative ${className}`}>
     <motion.div
       className="absolute inset-0 rounded-2xl"
@@ -59,7 +69,6 @@ const ScribbleProgress = ({ progress }: { progress: number }) => (
       animate={{ x: ['-100%', '100%'] }}
       transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
     />
-    {/* Sparkle particles */}
     {[...Array(3)].map((_, i) => (
       <motion.div
         key={i}
@@ -81,7 +90,13 @@ const ScribbleProgress = ({ progress }: { progress: number }) => (
 );
 
 // Hand-drawn button component
-const DoodleButton = ({ children, onClick, disabled, className = '', type = 'button' }: {
+const DoodleButton = ({
+  children,
+  onClick,
+  disabled,
+  className = '',
+  type = 'button',
+}: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
@@ -97,12 +112,13 @@ const DoodleButton = ({ children, onClick, disabled, className = '', type = 'but
     whileTap={{ scale: disabled ? 1 : 0.98 }}
     variants={wiggle}
   >
-    {/* Animated border */}
     <motion.div
       className="absolute inset-0 rounded-xl"
       style={{ border: '3px solid transparent' }}
       animate={{
-        borderColor: disabled ? '#475569' : ['#4ade80', '#22d3ee', '#a78bfa', '#4ade80'],
+        borderColor: disabled
+          ? '#475569'
+          : ['#4ade80', '#22d3ee', '#a78bfa', '#4ade80'],
         borderStyle: 'dashed',
       }}
       transition={{ duration: 2, repeat: Infinity }}
@@ -117,7 +133,8 @@ const VHSScanLines = () => (
     <div
       className="absolute inset-0 opacity-5"
       style={{
-        backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.1) 2px, rgba(255,255,255,0.1) 4px)',
+        backgroundImage:
+          'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.1) 2px, rgba(255,255,255,0.1) 4px)',
       }}
     />
     <motion.div
@@ -136,13 +153,97 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [dateStr, setDateStr] = useState<string>('');
 
+  // NSFW model state
+  const [nsfwModel, setNsfwModel] = useState<any>(null);
+  const [isScanning, setIsScanning] = useState(false);
+
+  // Load NSFW model on page load
+  useEffect(() => {
+    const loadModel = async () => {
+      try {
+        const model = await nsfwjs.load();
+        setNsfwModel(model);
+      } catch (err) {
+        console.error('Error loading NSFW model', err);
+      }
+    };
+    loadModel();
+  }, []);
+
+  // Simple popup for unsafe images
+  const showUnsafePopup = () => {
+    alert(
+      '⚠️ This image is flagged as inappropriate or disturbing.\n\nFor safety, EventShare does not allow such content to be uploaded.'
+    );
+  };
+
+  // Check if a single image file is safe
+  async function isImageSafe(file: File): Promise<boolean> {
+    if (!nsfwModel) return true; // if model not ready, don't block
+
+    // Only check images, skip videos
+    if (!file.type.startsWith('image/')) return true;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.src = objectUrl;
+
+      img.onload = async () => {
+        try {
+          const predictions = await nsfwModel.classify(img);
+
+          const unsafe = predictions.some(
+            (p: any) =>
+              ['Porn', 'Hentai', 'Sexy', 'Violence', 'Graphic'].includes(
+                p.className
+              ) && p.probability > 0.55
+          );
+
+          resolve(!unsafe);
+        } catch (err) {
+          console.error('Error classifying image', err);
+          resolve(true);
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(true);
+      };
+    });
+  }
+
+  // Handle file selection with safety check
+  const handleFileSelect = async (e: any) => {
+    const selected = e.target.files as FileList | null;
+    if (!selected || selected.length === 0) return;
+
+    setIsScanning(true);
+
+    // Check all selected files
+    for (const file of Array.from(selected)) {
+      const safe = await isImageSafe(file);
+      if (!safe) {
+        setIsScanning(false);
+        e.target.value = '';
+        showUnsafePopup();
+        return;
+      }
+    }
+
+    setIsScanning(false);
+    setFiles(selected);
+  };
+
   // On mount: check if user has an active event in localStorage
   useEffect(() => {
     const saved = localStorage.getItem('activeEventCode');
     if (saved) {
       setCode(saved);
     }
-    // Set date on client only to avoid hydration mismatch
     setDateStr(new Date().toLocaleDateString());
   }, []);
 
@@ -161,7 +262,10 @@ export default function UploadPage() {
   const uploadToCloudinary = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!);
+    formData.append(
+      'upload_preset',
+      process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!
+    );
     formData.append('folder', 'events');
 
     const res = await fetch(
@@ -189,15 +293,19 @@ export default function UploadPage() {
         localStorage.setItem('activeEventCode', result.code);
         localStorage.setItem('lastEventCode', result.code);
 
-        // Save to history (persistent across sessions)
-        const history = JSON.parse(localStorage.getItem('eventHistory') || '[]');
+        const history = JSON.parse(
+          localStorage.getItem('eventHistory') || '[]'
+        );
         const newEntry = {
           code: result.code,
           duration,
           uploadedAt: new Date().toISOString(),
           fileCount: files.length,
         };
-        localStorage.setItem('eventHistory', JSON.stringify([newEntry, ...history.slice(0, 9)]));
+        localStorage.setItem(
+          'eventHistory',
+          JSON.stringify([newEntry, ...history.slice(0, 9)])
+        );
       }
     } catch (err) {
       alert('Upload failed. Try again.');
@@ -209,7 +317,7 @@ export default function UploadPage() {
   // Safe clipboard copy with fallback
   const copyToClipboard = async () => {
     if (!code) return;
-    
+
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(code);
@@ -238,7 +346,7 @@ export default function UploadPage() {
   return (
     <div className="min-h-screen relative overflow-hidden bg-slate-950 flex items-center justify-center p-6">
       <DoodleFilter />
-      
+
       {/* Retro grid background */}
       <div
         className="absolute inset-0 opacity-20"
@@ -250,7 +358,7 @@ export default function UploadPage() {
           backgroundSize: '50px 50px',
         }}
       />
-      
+
       {/* Floating doodle elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {[...Array(6)].map((_, i) => (
@@ -277,7 +385,7 @@ export default function UploadPage() {
         ))}
       </div>
 
-      {/* Glowing orbs with retro colors */}
+      {/* Glowing orbs */}
       <motion.div
         className="absolute top-1/4 left-1/4 w-64 h-64 bg-green-500/10 rounded-full blur-3xl"
         animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }}
@@ -289,7 +397,7 @@ export default function UploadPage() {
         transition={{ duration: 4, repeat: Infinity }}
       />
 
-      {/* Main card with doodle style */}
+      {/* Main card */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -333,7 +441,7 @@ export default function UploadPage() {
             <span className="font-mono">← BACK</span>
           </motion.a>
 
-          {/* Title with retro styling */}
+          {/* Title */}
           <div className="text-center mb-8">
             <motion.div
               className="inline-flex items-center gap-3 mb-3"
@@ -365,7 +473,6 @@ export default function UploadPage() {
                 exit={{ opacity: 0, scale: 0.9 }}
                 className="text-center space-y-6"
               >
-                {/* Success indicator */}
                 <motion.div
                   className="flex items-center justify-center gap-2 text-green-400"
                   initial={{ y: -20 }}
@@ -380,7 +487,6 @@ export default function UploadPage() {
                   <p className="font-mono text-lg">EVENT IS LIVE!</p>
                 </motion.div>
 
-                {/* Code display with doodle border */}
                 <DoodleBorder className="p-1">
                   <motion.div
                     className="bg-slate-800/80 p-8 rounded-xl"
@@ -404,7 +510,6 @@ export default function UploadPage() {
                   </motion.div>
                 </DoodleBorder>
 
-                {/* Action buttons */}
                 <div className="space-y-3">
                   <DoodleButton
                     onClick={copyToClipboard}
@@ -432,7 +537,6 @@ export default function UploadPage() {
                   </button>
                 </div>
 
-                {/* Info badge */}
                 <div className="flex items-center justify-center gap-2 text-xs font-mono text-slate-500">
                   <Clock className="w-4 h-4" />
                   <span>expires in {duration}h • saved locally</span>
@@ -462,32 +566,38 @@ export default function UploadPage() {
                       >
                         <Upload className="w-10 h-10 text-green-400" />
                       </motion.div>
+
                       <div className="text-center">
                         <p className="text-green-400 font-mono text-sm mb-1">
-                          Click to choose files
+                          {isScanning
+                            ? 'Scanning files for safety...'
+                            : 'Click to choose files'}
                         </p>
                         <p className="text-slate-500 font-mono text-xs">
                           or drag and drop
                         </p>
                       </div>
+
                       <input
                         id="file-upload"
                         type="file"
                         multiple
                         accept="image/*,video/*"
-                        onChange={(e) => setFiles(e.target.files)}
+                        onChange={handleFileSelect}
                         className="hidden"
-                        disabled={uploading}
+                        disabled={uploading || isScanning}
                       />
+
                       <AnimatePresence>
-                        {files && (
+                        {files && !isScanning && (
                           <motion.div
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -10 }}
                             className="text-xs font-mono text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-full border border-dashed border-cyan-500/50"
                           >
-                            ✓ {files.length} file{files.length > 1 ? 's' : ''} selected
+                            ✓ {files.length} file
+                            {files.length > 1 ? 's' : ''} selected
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -533,12 +643,16 @@ export default function UploadPage() {
                 {/* Submit button with doodle animation */}
                 <DoodleButton
                   type="submit"
-                  disabled={uploading || !files}
+                  disabled={uploading || !files || isScanning}
                   className="w-full py-5 rounded-xl font-mono font-bold text-white bg-gradient-to-r from-green-600/80 via-cyan-600/80 to-purple-600/80 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <motion.span
                     className="flex items-center justify-center gap-3"
-                    animate={uploading ? { opacity: [1, 0.5, 1] } : {}}
+                    animate={
+                      uploading || isScanning
+                        ? { opacity: [1, 0.5, 1] }
+                        : {}
+                    }
                     transition={{ duration: 1, repeat: Infinity }}
                   >
                     {uploading ? (
@@ -546,9 +660,26 @@ export default function UploadPage() {
                         <motion.div
                           className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full"
                           animate={{ rotate: 360 }}
-                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                          transition={{
+                            duration: 1,
+                            repeat: Infinity,
+                            ease: 'linear',
+                          }}
                         />
                         UPLOADING...
+                      </>
+                    ) : isScanning ? (
+                      <>
+                        <motion.div
+                          className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full"
+                          animate={{ rotate: 360 }}
+                          transition={{
+                            duration: 1,
+                            repeat: Infinity,
+                            ease: 'linear',
+                          }}
+                        />
+                        SCANNING FOR SAFETY...
                       </>
                     ) : (
                       <>

@@ -1,11 +1,10 @@
 'use client';
-
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import Image from 'next/image';
 import FaceUploadModal from '@/components/FaceUploadModal';
-import { Upload, RefreshCw, X } from 'lucide-react';
+import { Upload, RefreshCw, X, Filter, Download, Maximize2 } from 'lucide-react';
 
 export default function ViewPage() {
   // Core state
@@ -14,12 +13,18 @@ export default function ViewPage() {
   const [allMedia, setAllMedia] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  // Face‑filter state
+  // Face-filter state
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
   const [filterProgress, setFilterProgress] = useState(0);
   const [filteredCount, setFilteredCount] = useState(0);
+  // Full screen state
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  // Swipe state for full screen
+  const [touchStart, setTouchStart] = useState(0);
+  const [touchEnd, setTouchEnd] = useState(0);
+  const minSwipeDistance = 50;
 
   // Helper: clear cached data for the current event code
   const clearCache = () => {
@@ -105,7 +110,7 @@ export default function ViewPage() {
     setFilteredCount(0);
   };
 
-  // Perform face‑based filtering using the descriptor from the modal
+  // Perform face-based filtering using the descriptor from the modal
   const handleFaceScan = async (userDescriptor: Float32Array) => {
     setIsFiltering(true);
     setFilterProgress(0);
@@ -123,11 +128,10 @@ export default function ViewPage() {
         faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
         faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
       ]);
-
       const total = allMedia.length;
       for (let i = 0; i < total; i++) {
         const url = allMedia[i];
-        // Skip videos – they cannot be processed with face‑api in the browser
+        // Skip videos – they cannot be processed with face-api in the browser
         if (url.includes('/video/')) {
           setFilterProgress(((i + 1) / total) * 100);
           continue;
@@ -161,6 +165,88 @@ export default function ViewPage() {
     }
   };
 
+  // Download handler for images
+  const handleDownload = async (url: string) => {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Failed to fetch image');
+      }
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = url.split('/').pop()?.split('?')[0] || `image-${Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error('Download failed', error);
+      // Fallback: try direct download (may open tab if CORS issue)
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = url.split('/').pop()?.split('?')[0] || `image-${Date.now()}.jpg`;
+      a.target = '_blank'; // This might open tab, but better than nothing
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
+  // Full screen handlers
+  const openFullScreen = (index: number) => {
+    setCurrentIndex(index);
+    setIsFullScreen(true);
+  };
+
+  const closeFullScreen = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    setIsFullScreen(false);
+    setCurrentIndex(0);
+  };
+
+  const nextImage = () => {
+    setCurrentIndex((prev) => (prev < media.length - 1 ? prev + 1 : 0));
+  };
+
+  const prevImage = () => {
+    setCurrentIndex((prev) => (prev > 0 ? prev - 1 : media.length - 1));
+  };
+
+  // Swipe handlers
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.target instanceof Element && e.target.closest('button')) return; // Ignore if touching button
+    setTouchEnd(0);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+    if (isLeftSwipe) {
+      nextImage();
+    }
+    if (isRightSwipe) {
+      prevImage();
+    }
+  };
+
+  // Click handler for modal background to close
+  const handleModalClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      closeFullScreen();
+    }
+  };
+
   // Render UI
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 p-4">
@@ -179,12 +265,12 @@ export default function ViewPage() {
               maxLength={5}
               autoFocus
             />
-            {code && (
+            {allMedia.length > 0 && !loading && media.length === allMedia.length && (
               <button
-                onClick={() => { setCode(''); setMedia([]); setAllMedia([]); clearCache(); }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-red-500 text-xl"
+                onClick={() => setIsFilterModalOpen(true)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 bg-blue-600 text-white rounded-full p-2 hover:bg-blue-700 transition shadow-lg shadow-blue-500/20"
               >
-                ×
+                <Filter size={20} />
               </button>
             )}
           </div>
@@ -195,7 +281,6 @@ export default function ViewPage() {
           >
             {loading ? 'Loading...' : 'View Photos'}
           </button>
-
           {/* Filter Controls */}
           {allMedia.length > 0 && !loading && (
             <div className="mt-8 flex flex-col items-center gap-4">
@@ -212,16 +297,7 @@ export default function ViewPage() {
                     Show All Photos
                   </button>
                 </div>
-              ) : (
-                <button
-                  onClick={() => setIsFilterModalOpen(true)}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-full font-medium hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-500/20"
-                >
-                  <Upload size={20} />
-                  Upload My Photo
-                </button>
-              )}
-
+              ) : null}
               {isFiltering && (
                 <div className="w-full max-w-md mt-4">
                   <div className="flex justify-between text-sm mb-1">
@@ -230,7 +306,7 @@ export default function ViewPage() {
                   </div>
                   <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-blue-600 transition-all duration-300"
+                      className="h-full bg-black transition-all duration-300"
                       style={{ width: `${filterProgress}%` }}
                     />
                   </div>
@@ -238,10 +314,8 @@ export default function ViewPage() {
               )}
             </div>
           )}
-
           {error && <p className="text-red-500 mt-4 text-lg">{error}</p>}
         </div>
-
         {/* Media Grid */}
         {media.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-12">
@@ -251,26 +325,104 @@ export default function ViewPage() {
                   <source src={url} />
                 </video>
               ) : (
-                <Image
-                  key={i}
-                  src={url}
-                  alt=""
-                  width={600}
-                  height={600}
-                  className="w-full h-auto rounded-xl shadow-lg object-cover"
-                />
+                <div key={i} className="relative group">
+                  <Image
+                    src={url}
+                    alt=""
+                    width={600}
+                    height={600}
+                    className="w-full h-auto rounded-xl shadow-lg object-cover cursor-pointer group-hover:opacity-90 transition-opacity"
+                    onClick={() => openFullScreen(i)}
+                  />
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownload(url);
+                      }}
+                      className="bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition"
+                      title="Download"
+                    >
+                      <Download size={16} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openFullScreen(i);
+                      }}
+                      className="bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition"
+                      title="Full Screen"
+                    >
+                      <Maximize2 size={16} />
+                    </button>
+                  </div>
+                </div>
               )
             )}
           </div>
         )}
       </div>
-
       {/* Face Upload Modal */}
       <FaceUploadModal
         isOpen={isFilterModalOpen}
         onClose={() => setIsFilterModalOpen(false)}
         onScan={handleFaceScan}
       />
+      {/* Full Screen Modal */}
+      {isFullScreen && (
+        <div
+          className="fixed inset-0 bg-black z-50 flex items-center justify-center p-4"
+          onClick={handleModalClick}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+        >
+          <button
+            onClick={closeFullScreen}
+            className="absolute top-4 right-4 text-white text-2xl hover:opacity-80 transition z-10"
+          >
+            <X size={32} />
+          </button>
+          <button
+            onClick={prevImage}
+            className="absolute left-4 text-white text-4xl hover:opacity-80 transition z-10"
+          >
+            ‹
+          </button>
+          <button
+            onClick={nextImage}
+            className="absolute right-4 text-white text-4xl hover:opacity-80 transition z-10"
+          >
+            ›
+          </button>
+          <div className="relative w-full h-full flex items-center justify-center">
+            {media[currentIndex].includes('/video/') ? (
+              <video 
+                controls 
+                className="max-w-full max-h-full object-contain"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <source src={media[currentIndex]} />
+              </video>
+            ) : (
+              <Image
+                key={media[currentIndex]} // Key to force reload if needed
+                src={media[currentIndex]}
+                alt=""
+                fill
+                priority
+                className="object-contain cursor-pointer"
+                sizes="100vw"
+                onClick={nextImage}
+                onError={(e) => {
+                  console.error('Image load error:', media[currentIndex]);
+                  // Fallback or handle error
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

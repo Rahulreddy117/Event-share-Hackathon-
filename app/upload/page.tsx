@@ -501,12 +501,23 @@ export default function UploadPage() {
                     transition={{ duration: 3, repeat: Infinity }}
                   >
                     <motion.p
-                      className="text-6xl md:text-7xl font-mono font-black tracking-[0.3em] bg-gradient-to-r from-green-400 via-cyan-400 to-purple-400 bg-clip-text text-transparent"
-                      animate={{ scale: [1, 1.02, 1] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    >
-                      {code}
-                    </motion.p>
+  className="
+    text-4xl
+    sm:text-5xl 
+    md:text-7xl 
+    font-mono font-black
+    tracking-[0.15em] 
+    sm:tracking-[0.2em]
+    md:tracking-[0.3em]
+    break-words text-center
+  "
+  style={{ wordBreak: "break-all" }}
+  animate={{ scale: [1, 1.02, 1] }}
+  transition={{ duration: 2, repeat: Infinity }}
+>
+  {code}
+</motion.p>
+
                   </motion.div>
                 </DoodleBorder>
 
